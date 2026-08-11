@@ -1,4 +1,4 @@
-# Gym Tracker
+# Gym Tracker (an app to see you progress)
 
 A React + Capacitor app that logs gym workouts day-by-day (Sun–Sat), with
 dynamic user-defined exercises and automatic progressive-overload suggestions.
