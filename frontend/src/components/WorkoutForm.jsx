@@ -1,14 +1,59 @@
-import { useState } from "react";
-import { createLog } from "../db/database";
+import { useState, useEffect, useRef } from "react";
+import { createLog, updateLog, getMostRecentLogForExercise } from "../db/database";
+import { saveDraft, loadDraft, clearDraft } from "../utils/draft";
+import RestTimer from "./RestTimer";
 
-const emptySet = () => ({ reps: "", weight: "", rest_seconds: "" });
+const emptySet = () => ({ reps: "", weight: "", rest_seconds: 0 });
 
-export default function WorkoutForm({ date, onSaved }) {
+/**
+ * editingLog: pass an existing log object to switch into edit mode (updates
+ * that log's sets/notes instead of creating a new entry). Pass null/undefined
+ * for the normal "log a new exercise" mode.
+ * exerciseNames: previously-used exercise names, for the autocomplete list.
+ */
+export default function WorkoutForm({ date, onSaved, editingLog, onCancelEdit, exerciseNames = [] }) {
+  const isEditing = Boolean(editingLog);
+  const draftKey = `draft_workout_${date}`;
+  const skipDraftSave = useRef(false);
+
   const [exerciseName, setExerciseName] = useState("");
   const [sets, setSets] = useState([emptySet()]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [repeatStatus, setRepeatStatus] = useState("");
+
+  // Populate from an existing log when entering edit mode, otherwise restore
+  // any unsaved draft for this date (so switching tabs doesn't lose input).
+  useEffect(() => {
+    skipDraftSave.current = true;
+    if (isEditing) {
+      setExerciseName(editingLog.exercise_name);
+      setSets(editingLog.sets.map((s) => ({ ...s })));
+      setNotes(editingLog.notes || "");
+    } else {
+      const draft = loadDraft(draftKey);
+      if (draft) {
+        setExerciseName(draft.exerciseName || "");
+        setSets(draft.sets && draft.sets.length ? draft.sets : [emptySet()]);
+        setNotes(draft.notes || "");
+      } else {
+        setExerciseName("");
+        setSets([emptySet()]);
+        setNotes("");
+      }
+    }
+    setRepeatStatus("");
+    // Allow the save-effect below to run again after this reset.
+    const t = setTimeout(() => { skipDraftSave.current = false; }, 0);
+    return () => clearTimeout(t);
+  }, [isEditing, editingLog, draftKey]);
+
+  // Persist a draft on every change, only while creating a new entry (not editing).
+  useEffect(() => {
+    if (isEditing || skipDraftSave.current) return;
+    saveDraft(draftKey, { exerciseName, sets, notes });
+  }, [exerciseName, sets, notes, isEditing, draftKey]);
 
   function updateSet(index, field, value) {
     setSets((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
@@ -18,15 +63,37 @@ export default function WorkoutForm({ date, onSaved }) {
     setSets((prev) => [...prev, emptySet()]);
   }
 
+  function duplicateLastSet() {
+    setSets((prev) => {
+      const last = prev[prev.length - 1];
+      return [...prev, { ...last }];
+    });
+  }
+
   function removeSet(index) {
     setSets((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function handleRepeatLastSession() {
+    if (!exerciseName.trim()) {
+      setError("Type an exercise name first, then repeat its last session.");
+      return;
+    }
+    setError("");
+    const last = await getMostRecentLogForExercise(exerciseName.trim(), date);
+    if (!last) {
+      setRepeatStatus("No previous session found for this exercise yet.");
+      return;
+    }
+    setSets(last.sets.map((s) => ({ ...s })));
+    setRepeatStatus(`Loaded sets from ${last.log_date}.`);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
-    if (!exerciseName.trim()) {
+    if (!isEditing && !exerciseName.trim()) {
       setError("Enter an exercise name.");
       return;
     }
@@ -42,15 +109,22 @@ export default function WorkoutForm({ date, onSaved }) {
 
     setBusy(true);
     try {
-      await createLog({
-        exerciseName: exerciseName.trim(),
-        logDate: date,
-        sets: parsedSets,
-        notes: notes || undefined,
-      });
-      setExerciseName("");
-      setSets([emptySet()]);
-      setNotes("");
+      if (isEditing) {
+        await updateLog(editingLog.id, { sets: parsedSets, notes: notes || null });
+        onCancelEdit?.();
+      } else {
+        await createLog({
+          exerciseName: exerciseName.trim(),
+          logDate: date,
+          sets: parsedSets,
+          notes: notes || undefined,
+        });
+        clearDraft(draftKey);
+        setExerciseName("");
+        setSets([emptySet()]);
+        setNotes("");
+        setRepeatStatus("");
+      }
       onSaved?.();
     } catch (err) {
       setError("Failed to save workout. " + (err?.message || ""));
@@ -59,19 +133,38 @@ export default function WorkoutForm({ date, onSaved }) {
     }
   }
 
+  function handleCancel() {
+    onCancelEdit?.();
+  }
+
   return (
     <form className="workout-form" onSubmit={handleSubmit}>
-      <h3>Log an exercise for {date}</h3>
+      <h3>{isEditing ? `Editing: ${editingLog.exercise_name}` : `Log an exercise for ${date}`}</h3>
       {error && <p className="error">{error}</p>}
 
-      <input
-        placeholder="Exercise name (e.g. Bench Press)"
-        value={exerciseName}
-        onChange={(e) => setExerciseName(e.target.value)}
-      />
+      {!isEditing && (
+        <>
+          <input
+            list="exercise-name-options"
+            placeholder="Exercise name (e.g. Bench Press)"
+            value={exerciseName}
+            onChange={(e) => { setExerciseName(e.target.value); setRepeatStatus(""); }}
+          />
+          <datalist id="exercise-name-options">
+            {exerciseNames.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+
+          <button type="button" className="secondary repeat-btn" onClick={handleRepeatLastSession}>
+            Repeat last session
+          </button>
+          {repeatStatus && <p className="muted">{repeatStatus}</p>}
+        </>
+      )}
 
       <div className="sets-header">
-        <span>Set</span><span>Reps</span><span>Weight</span><span>Rest (s)</span><span></span>
+        <span>Set</span><span>Reps</span><span>Weight</span><span>Rest</span><span></span>
       </div>
       {sets.map((set, i) => (
         <div className="set-row" key={i}>
@@ -91,19 +184,19 @@ export default function WorkoutForm({ date, onSaved }) {
             onChange={(e) => updateSet(i, "weight", e.target.value)}
             placeholder="Weight"
           />
-          <input
-            type="number"
-            min="0"
+          <RestTimer
             value={set.rest_seconds}
-            onChange={(e) => updateSet(i, "rest_seconds", e.target.value)}
-            placeholder="Rest"
+            onChange={(seconds) => updateSet(i, "rest_seconds", seconds)}
           />
           {sets.length > 1 && (
             <button type="button" className="icon-btn" onClick={() => removeSet(i)}>x</button>
           )}
         </div>
       ))}
-      <button type="button" className="secondary" onClick={addSet}>+ Add set</button>
+      <div className="set-buttons-row">
+        <button type="button" className="secondary" onClick={addSet}>+ Add set</button>
+        <button type="button" className="secondary" onClick={duplicateLastSet}>Same as last set</button>
+      </div>
 
       <textarea
         placeholder="Notes (optional)"
@@ -111,7 +204,14 @@ export default function WorkoutForm({ date, onSaved }) {
         onChange={(e) => setNotes(e.target.value)}
       />
 
-      <button type="submit" disabled={busy}>{busy ? "Saving..." : "Save exercise"}</button>
+      <div className="form-actions">
+        <button type="submit" disabled={busy}>
+          {busy ? "Saving..." : isEditing ? "Save changes" : "Save exercise"}
+        </button>
+        {isEditing && (
+          <button type="button" className="secondary" onClick={handleCancel}>Cancel</button>
+        )}
+      </div>
     </form>
   );
 }

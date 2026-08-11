@@ -178,6 +178,74 @@ th, td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #334
   animation: spin 0.8s linear infinite;
   margin-top: 0.5rem;
 }
+
+/* Rest timer */
+.rest-timer {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  justify-content: center;
+}
+.timer-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+}
+.timer-btn.running { background: var(--danger); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.timer-display { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); min-width: 40px; }
+
+/* Sub-tabs (Workout / Diet) */
+.sub-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.sub-tabs button {
+  flex: 1;
+}
+.sub-tabs button.active { background: var(--accent); }
+.sub-tabs button.secondary { background: transparent; border: 1px solid #334155; color: var(--muted); }
+
+/* Edit mode */
+.workout-card.editing { border: 1px solid var(--accent-light); }
+.card-actions { display: flex; gap: 0.4rem; }
+.form-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+
+/* Diet */
+.diet-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.diet-list table { margin-top: 0.5rem; }
+.diet-total-row td { font-weight: 700; border-top: 2px solid #334155; border-bottom: none; }
+
+/* Streak badge */
+.streak-badge {
+  background: var(--surface);
+  border: 1px solid #d97706;
+  color: #fbbf24;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Repeat last session / duplicate set */
+.repeat-btn { margin: 0.4rem 0; width: 100%; }
+.set-buttons-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+.set-buttons-row button { flex: 1; }
+
+/* Progress chart */
+.progress-chart { margin-top: 0.5rem; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

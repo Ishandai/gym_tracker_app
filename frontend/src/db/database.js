@@ -23,6 +23,17 @@ CREATE TABLE IF NOT EXISTS workout_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_logs_exercise_date ON workout_logs(exercise_name, log_date);
+
+CREATE TABLE IF NOT EXISTS diet_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_date TEXT NOT NULL,
+  food_name TEXT NOT NULL,
+  calories REAL NOT NULL,
+  protein REAL NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_diet_date ON diet_logs(log_date);
 `;
 
 /**
@@ -145,6 +156,24 @@ export async function deleteLog(id) {
   await db.run("DELETE FROM workout_logs WHERE id = ?", [id]);
 }
 
+/** Most recent previously-logged entry for this exercise, excluding the given date. Used for "repeat last session". */
+export async function getMostRecentLogForExercise(exerciseName, excludeDate) {
+  const db = getDb();
+  const res = await db.query(
+    "SELECT * FROM workout_logs WHERE exercise_name = ? AND log_date != ? ORDER BY log_date DESC, id DESC LIMIT 1",
+    [exerciseName, excludeDate || ""]
+  );
+  const rows = res.values || [];
+  return rows.length ? rowToLog(rows[0]) : null;
+}
+
+/** Every distinct date with at least one workout logged — used for the streak counter. */
+export async function getAllWorkoutDates() {
+  const db = getDb();
+  const res = await db.query("SELECT DISTINCT log_date FROM workout_logs ORDER BY log_date DESC");
+  return (res.values || []).map((r) => r.log_date);
+}
+
 export async function updateLog(id, { sets, notes }) {
   const db = getDb();
   if (sets !== undefined) {
@@ -155,11 +184,64 @@ export async function updateLog(id, { sets, notes }) {
   }
 }
 
+// --- Diet logs -----------------------------------------------------------
+
+function rowToDietLog(row) {
+  return {
+    id: row.id,
+    log_date: row.log_date,
+    food_name: row.food_name,
+    calories: row.calories,
+    protein: row.protein,
+  };
+}
+
+export async function createDietLog({ foodName, logDate, calories, protein }) {
+  const db = getDb();
+  const date = logDate || new Date().toISOString().slice(0, 10);
+
+  await db.run(
+    `INSERT INTO diet_logs (log_date, food_name, calories, protein) VALUES (?, ?, ?, ?)`,
+    [date, foodName.trim(), Number(calories), Number(protein)]
+  );
+}
+
+export async function getDietLogsByDate(date) {
+  const db = getDb();
+  const res = await db.query(
+    "SELECT * FROM diet_logs WHERE log_date = ? ORDER BY id",
+    [date]
+  );
+  return (res.values || []).map(rowToDietLog);
+}
+
+export async function deleteDietLog(id) {
+  const db = getDb();
+  await db.run("DELETE FROM diet_logs WHERE id = ?", [id]);
+}
+
+export async function updateDietLog(id, { foodName, calories, protein }) {
+  const db = getDb();
+  if (foodName !== undefined) {
+    await db.run("UPDATE diet_logs SET food_name = ? WHERE id = ?", [foodName.trim(), id]);
+  }
+  if (calories !== undefined) {
+    await db.run("UPDATE diet_logs SET calories = ? WHERE id = ?", [Number(calories), id]);
+  }
+  if (protein !== undefined) {
+    await db.run("UPDATE diet_logs SET protein = ? WHERE id = ?", [Number(protein), id]);
+  }
+}
+
 // --- Export / backup -------------------------------------------------------
 
-/** Returns every log as a plain JSON-serializable array — useful for a manual backup/export feature. */
+/** Returns every log (workout + diet) as plain JSON-serializable arrays — used by the Backup page. */
 export async function exportAllData() {
   const db = getDb();
-  const res = await db.query("SELECT * FROM workout_logs ORDER BY log_date, id");
-  return (res.values || []).map(rowToLog);
+  const workoutRes = await db.query("SELECT * FROM workout_logs ORDER BY log_date, id");
+  const dietRes = await db.query("SELECT * FROM diet_logs ORDER BY log_date, id");
+  return {
+    workouts: (workoutRes.values || []).map(rowToLog),
+    diet: (dietRes.values || []).map(rowToDietLog),
+  };
 }
